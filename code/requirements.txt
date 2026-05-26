@@ -1,0 +1,6 @@
+groq
+rank-bm25
+langchain-text-splitters
+langdetect
+python-dotenv
+pytest

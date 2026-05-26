@@ -24,3 +24,7 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Logs and cache
+log.txt
+.cache/
