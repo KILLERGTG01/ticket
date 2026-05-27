@@ -1,4 +1,4 @@
-groq
+openai
 rank-bm25
 langchain-text-splitters
 langdetect

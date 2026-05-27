@@ -3,9 +3,10 @@
 ## Setup
 
 ```bash
-pip install -r code/requirements.txt
+pip install uv
+uv pip install -r code/requirements.txt
 cp .env.example .env
-# Edit .env: GROQ_API_KEY=your_key  (free at console.groq.com)
+# Edit .env: OPENAI_API_KEY=your_key
 ```
 
 ## Run
@@ -34,4 +35,5 @@ All in `code/requirements.txt`. No GPU required.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `GROQ_API_KEY` | Yes | Free tier at console.groq.com |
+| `OPENAI_API_KEY` | Yes | Used by the OpenAI SDK |
+| `OPENAI_MODEL` | No | Defaults to `gpt-4.1-mini` |

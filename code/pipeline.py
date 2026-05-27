@@ -2,7 +2,7 @@ import json, os, re
 from typing import List, Tuple
 
 from classifier import detect_pii, detect_injection, detect_language, mask_pii
-from agent import build_prompt, call_groq
+from agent import build_prompt, call_openai
 from tools import validate_actions
 from confidence import compute_confidence
 from query_expansion import build_queries, infer_domain
@@ -122,7 +122,7 @@ def process_ticket(
         language=language,
     )
 
-    result = call_groq(prompt)
+    result = call_openai(prompt)
 
     result['language'] = language
     result['pii_detected'] = merge_pii_flag(pii_detected, result.get('pii_detected', False))

@@ -19,7 +19,7 @@ support_tickets.csv
 │  1. parse_issue_text()   — JSON turns → flat text    │
 │  2. classifier.py        — PII, injection, language  │
 │  3. corpus.search_multi()— top-7 chunk retrieval     │
-│  4. agent.call_groq()    — structured JSON response  │
+│  4. agent.call_openai() — structured JSON response    │
 │  5. source override      — paths from retrieval only │
 │  6. tools.validate()     — strict schema check       │
 │  7. confidence.compute() — deterministic score       │
@@ -51,8 +51,9 @@ support_tickets.csv
 - **Language**: `langdetect` → ISO 639-1; falls back to `en` on failure
 
 ### agent.py — LLM Integration
-- Model: `llama-3.3-70b-versatile` via Groq API
+- Model: `gpt-4.1-mini` via OpenAI API
 - `temperature=0.0, seed=42` for determinism
+- OpenAI chat completions JSON schema response format keeps the LLM output structured
 - `source_documents` key stripped from model output — never trusted
 - Exponential backoff on `RateLimitError`: 5s → 10s → 20s → 40s (4 retries)
 
@@ -119,7 +120,7 @@ RRF rewards chunks ranking highly across multiple queries — more robust than s
 
 1. **Thin Visa corpus (19 docs):** Complex Visa queries may retrieve weakly relevant chunks.
 2. **No cross-document conflict resolution:** When two corpus docs contradict, the LLM picks one without flagging.
-3. **Groq free-tier rate limits:** Daily token limit separate from per-minute throttling. Backoff handles transient throttling but not daily exhaustion.
+3. **OpenAI API rate limits:** Daily token limit separate from per-minute throttling. Backoff handles transient throttling but not daily exhaustion.
 4. **Language detection on short text:** `langdetect` unreliable on <10-word tickets; falls back to `en`.
 5. **`_identity_in_context` is a heuristic:** Checks for "verified" in issue text — not session state.
 
@@ -144,7 +145,7 @@ multi-query list
     ▼ build_prompt()
 prompt (with ⚠️ warnings if inject/pii)
     │
-    ▼ call_groq() [temperature=0, seed=42, 4-retry backoff]
+    ▼ call_openai() [temperature=0, seed=42, 4-retry backoff]
 raw JSON (source_documents stripped)
     │
     ▼ parse_agent_response()
@@ -166,13 +167,13 @@ output row (14 cols)
 
 | Dimension | Score | Rationale |
 |---|---|---|
-| Response quality | 7 | Groq 70B strong; thin Visa corpus limits that domain |
+| Response quality | 7 | OpenAI GPT-4.1 mini strong; thin Visa corpus limits that domain |
 | Safety / adversarial robustness | 8 | 19 injection patterns + system prompt rules + source validation |
 | PII detection | 8 | Regex covers common formats; unusual formats may miss |
 | Escalation precision | 7 | Deterministic escalation for legal/fraud/identity theft |
 | Source attribution | 9 | Paths from retrieval only, validated on disk — zero hallucinated paths |
 | Tool calling | 8 | Strict schema: name, required, no-extra, types, prerequisites |
 | Confidence calibration | 7 | Deterministic formula; not empirically calibrated |
-| Speed | 9 | ~1s/ticket on free Groq |
+| Speed | 9 | ~1s/ticket on OpenAI API |
 | Determinism | 10 | temperature=0, seed=42 |
 | Code quality | 8 | Clear module boundaries, no hardcoded keys, 59 tests |

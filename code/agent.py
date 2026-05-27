@@ -1,12 +1,56 @@
 import json, re, os, time
-from groq import Groq, RateLimitError
+from openai import OpenAI, RateLimitError
 
 _client = None
+DEFAULT_MODEL = "gpt-4.1-mini"
 
-def _get_client() -> Groq:
+AGENT_RESPONSE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "support_triage_response",
+        "strict": False,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "status",
+                "product_area",
+                "response",
+                "justification",
+                "request_type",
+                "risk_level",
+                "pii_detected",
+                "language",
+                "actions_taken",
+            ],
+            "properties": {
+                "status": {"type": "string", "enum": ["replied", "escalated"]},
+                "product_area": {"type": "string"},
+                "response": {"type": "string"},
+                "justification": {"type": "string"},
+                "request_type": {
+                    "type": "string",
+                    "enum": ["product_issue", "feature_request", "bug", "invalid"],
+                },
+                "risk_level": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                "pii_detected": {"type": "boolean"},
+                "language": {"type": "string"},
+                "actions_taken": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": True,
+                    },
+                },
+            },
+        },
+    },
+}
+
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        _client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     return _client
 
 SYSTEM_PROMPT = """You are a support triage agent for three products: DevPlatform (HackerRank hiring platform), Claude (Anthropic AI assistant), and Visa (payment network).
@@ -106,20 +150,22 @@ def parse_agent_response(raw: str) -> dict:
 
     return data
 
-def call_groq(prompt: str, retries: int = 4) -> dict:
+def call_openai(prompt: str, retries: int = 4) -> dict:
     client = _get_client()
+    model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
     delay = 5
     for attempt in range(retries):
         try:
             chat = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",   "content": prompt},
                 ],
                 temperature=0.0,
                 seed=42,
-                max_tokens=1024,
+                max_completion_tokens=1024,
+                response_format=AGENT_RESPONSE_SCHEMA,
             )
             return parse_agent_response(chat.choices[0].message.content)
         except RateLimitError:
