@@ -4,6 +4,8 @@ from pipeline import (
     parse_issue_text, merge_pii_flag, sanitize_response_pii,
     dedupe_source_paths, validate_paths, classify_full_text,
     should_clear_sources, force_escalation_actions,
+    normalize_escalation_result, citation_paths_from_retrieval,
+    choose_domain,
 )
 
 REPO_ROOT = os.path.join(os.path.dirname(__file__), '..')
@@ -72,25 +74,91 @@ def test_should_clear_sources_for_invalid():
     assert should_clear_sources("escalated") is False
 
 def test_force_escalation_legal_threat():
-    actions = force_escalation_actions(
+    actions, override = force_escalation_actions(
         issue_text="I will sue your company if this is not resolved",
         current_actions=[]
     )
     names = [a['action'] for a in actions]
     assert 'escalate_to_human' in names
+    assert override is not None
+    assert "legal" in override.lower()
 
 def test_force_escalation_identity_theft():
-    actions = force_escalation_actions(
+    actions, override = force_escalation_actions(
         issue_text="Someone stole my identity and is using my account",
+        current_actions=[]
+    )
+    names = [a['action'] for a in actions]
+    assert 'escalate_to_human' in names
+    assert override is not None
+
+def test_force_escalation_identity_has_been_stolen():
+    actions, override = force_escalation_actions(
+        issue_text="My identity has been stolen, what should I do?",
         current_actions=[]
     )
     names = [a['action'] for a in actions]
     assert 'escalate_to_human' in names
 
 def test_force_escalation_not_triggered_for_faq():
-    actions = force_escalation_actions(
+    actions, override = force_escalation_actions(
         issue_text="How do I reset my password?",
         current_actions=[]
     )
     names = [a['action'] for a in actions]
     assert 'escalate_to_human' not in names
+    assert override is None
+
+def test_normalize_escalated_result_adds_human_action():
+    result = {
+        "status": "escalated",
+        "risk_level": "medium",
+        "justification": "Needs human review.",
+        "actions_taken": [],
+    }
+    normalized = normalize_escalation_result(result)
+    assert normalized["risk_level"] == "high"
+    assert normalized["actions_taken"][0]["action"] == "escalate_to_human"
+
+def test_normalize_escalated_result_override_justification():
+    result = {
+        "status": "escalated",
+        "risk_level": "medium",
+        "justification": "Original LLM justification.",
+        "actions_taken": [],
+    }
+    normalized = normalize_escalation_result(result, override_justification="Escalated: legal threat detected.")
+    assert normalized["justification"] == "Escalated: legal threat detected."
+
+def test_normalize_escalated_result_preserves_justification_without_override():
+    result = {
+        "status": "escalated",
+        "risk_level": "high",
+        "justification": "This is a complex case requiring review.",
+        "actions_taken": [{"action": "escalate_to_human", "parameters": {"priority": "high", "department": "general", "summary": "review"}}],
+    }
+    normalized = normalize_escalation_result(result, override_justification=None)
+    assert normalized["justification"] == "This is a complex case requiring review."
+
+def test_citation_paths_only_include_sent_docs_and_cap_count():
+    retrieved = [
+        ("data/visa/support.md", "sent", 1.0),
+        ("data/claude/index.md", "sent", 0.8),
+        ("data/visa/support.md", "duplicate", 0.7),
+        ("data/claude/other.md", "not sent", 0.6),
+    ]
+    paths = citation_paths_from_retrieval(retrieved, max_docs_sent=2, max_sources=3)
+    assert paths == ["data/visa/support.md", "data/claude/index.md"]
+
+def test_citation_paths_prefer_inferred_domain():
+    retrieved = [
+        ("data/visa/support.md", "sent", 1.0),
+        ("data/claude/index.md", "sent", 0.8),
+        ("data/visa/disputes.md", "sent", 0.7),
+    ]
+    paths = citation_paths_from_retrieval(retrieved, max_docs_sent=3, max_sources=3, domain="visa")
+    assert paths == ["data/visa/support.md", "data/visa/disputes.md"]
+
+def test_choose_domain_prefers_known_company():
+    assert choose_domain("Claude", "Visa card fraud mentioned in Claude ticket") == "claude"
+    assert choose_domain("Visa", "identity theft") == "visa"

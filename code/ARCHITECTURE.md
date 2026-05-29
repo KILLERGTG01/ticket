@@ -47,8 +47,8 @@ support_tickets.csv
 - `build_queries()` produces deduplicated multi-query list for BM25 RRF
 
 ### classifier.py — Pre-LLM Safety Layer
-- **PII**: regex for credit cards, SSN, email, phone, address
-- **Injection**: 19 regex patterns (ignore-instructions, DAN, jailbreak, classify-as, set-field-to, XML/INST tags, etc.)
+- **PII**: regex for credit cards, SSN, email, phone, address; CVE/case IDs (`CVE-YYYY-NNNNN`, `CASE-NNNNN`) are stripped before matching to avoid false positives
+- **Injection**: 24 regex patterns covering ignore-instructions, DAN, jailbreak, classify-as, set-field-to, XML/INST tags, "output the string", "respond exactly with", "prevent automatic escalation", and similar manipulation framings; `langdetect` seed fixed at 42 for determinism
 - **Language**: `langdetect` → ISO 639-1; falls back to `en` on failure
 
 ### agent.py — LLM Integration
@@ -68,10 +68,10 @@ support_tickets.csv
 - If OpenAI rate limits are encountered, reduce `MAX_WORKERS` to `2`; the existing OpenAI retry/backoff still handles transient throttling
 
 ### confidence.py — Deterministic Confidence
-- Base: mean of top-3 retrieval scores (0.30 floor if no results)
-- Source bonus: +0.05 per unique source, capped at +0.15
+- Base: weighted drop-off of top-3 retrieval scores (`top×0.40 + second×0.40 + third×0.20`); 0.30 floor if no results. Weights second and third heavily so their drop creates calibration spread — avoids saturation from RRF always normalizing top-1 to 1.0.
+- Source bonus: +0.02 per unique source, capped at +0.06
 - Penalties: risk level (0–0.25), injection (−0.40), PII (−0.05), invalid actions (−0.10), company mismatch (−0.10)
-- Clamped to [0.05, 0.95]
+- Clamped to [0.05, 0.88]
 
 ### tools.py — Strict Schema Validator
 - Validates `actions_taken` against `data/api_specs/internal_tools.json`
@@ -83,7 +83,7 @@ support_tickets.csv
 - Classifies over `subject + issue_text` combined — subject may contain PII or injection
 - Source attribution: `dedupe_source_paths()` → `validate_paths()` — every cited path verified with `os.path.exists()`
 - Merges PII flag from classifier OR agent (either true → true)
-- `force_escalation_actions()`: deterministic `escalate_to_human` for legal threats, identity theft, urgent fraud
+- `force_escalation_actions()`: deterministic `escalate_to_human` for legal threats, identity theft, urgent fraud; returns `(actions, override_justification)` — the override replaces the LLM's justification to avoid contradictions when the pipeline overrides a "low risk" LLM decision
 - Empty `source_documents` for `request_type=invalid` tickets
 
 ## Retrieval Strategy
@@ -211,7 +211,7 @@ write output.csv in original row order
 | Escalation precision | 7 | Deterministic escalation for legal/fraud/identity theft |
 | Source attribution | 9 | Paths from retrieval only, validated on disk — zero hallucinated paths |
 | Tool calling | 8 | Strict schema: name, required, no-extra, types, prerequisites |
-| Confidence calibration | 7 | Deterministic formula; not empirically calibrated |
+| Confidence calibration | 8 | Weighted drop-off formula produces spread across tickets; not empirically calibrated against ground truth |
 | Speed | 9 | Bounded parallelism with `MAX_WORKERS=4` reduces wall-clock runtime while preserving one-ticket-per-request accuracy |
-| Determinism | 10 | temperature=0, seed=42 |
-| Code quality | 8 | Clear module boundaries, no hardcoded keys, 59 tests |
+| Determinism | 10 | temperature=0, seed=42, langdetect seed=42 |
+| Code quality | 8 | Clear module boundaries, no hardcoded keys, 71 tests |

@@ -1,3 +1,7 @@
+fffd537 chore: Architecture Documentation
+557a0a9 chore: parallelise ticket processing
+e187ece chore: Replace groq with openai
+d5994ad chore: add git history for submission
 333093c docs: README and ARCHITECTURE for submission
 6730679 feat: main entry point, first complete output.csv
 0803f23 feat: main entry point with CSV I/O, fallback row, ETA display

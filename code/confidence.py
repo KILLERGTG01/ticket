@@ -12,11 +12,18 @@ def compute_confidence(
     company_mismatch: bool,
 ) -> float:
     if retrieval_scores:
-        base = sum(retrieval_scores[:3]) / min(len(retrieval_scores), 3)
+        s = retrieval_scores
+        # Use score drop-off to signal retrieval quality:
+        # top score is always ~1.0 (RRF-normalized); second+ scores reveal true discrimination.
+        top   = s[0] if len(s) > 0 else 0.5
+        sec   = s[1] if len(s) > 1 else top * 0.7
+        third = s[2] if len(s) > 2 else sec * 0.7
+        # Weight second and third heavily so their drop creates calibration spread
+        base = top * 0.40 + sec * 0.40 + third * 0.20
     else:
         base = 0.30
 
-    source_bonus = min(num_sources * 0.05, 0.15)
+    source_bonus = min(num_sources * 0.02, 0.06)
 
     risk_pen     = RISK_PENALTY.get(risk_level, 0.0)
     inject_pen   = 0.40 if injection_detected else 0.0
@@ -25,4 +32,4 @@ def compute_confidence(
     mismatch_pen = 0.10 if company_mismatch else 0.0
 
     score = base + source_bonus - risk_pen - inject_pen - pii_pen - action_pen - mismatch_pen
-    return round(max(0.05, min(0.95, score)), 3)
+    return round(max(0.05, min(0.88, score)), 3)
