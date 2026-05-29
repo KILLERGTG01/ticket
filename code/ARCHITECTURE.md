@@ -9,9 +9,10 @@ support_tickets.csv
 ┌──────────────────────────────────────────────────────┐
 │  main.py — Entry Point                               │
 │  Reads CSV, initializes Corpus + ToolSpecs once,     │
-│  iterates tickets, writes output.csv                 │
+│  processes tickets in a bounded thread pool,         │
+│  writes output.csv in original input order           │
 └──────────────────────────────────────────────────────┘
-        │  per ticket
+        │  per ticket worker
         ▼
 ┌──────────────────────────────────────────────────────┐
 │  pipeline.py — Per-Ticket Orchestrator               │
@@ -57,6 +58,15 @@ support_tickets.csv
 - `source_documents` key stripped from model output — never trusted
 - Exponential backoff on `RateLimitError`: 5s → 10s → 20s → 40s (4 retries)
 
+### main.py — Parallel Ticket Execution
+- Uses `ThreadPoolExecutor` with `MAX_WORKERS` from the environment, defaulting to `4`
+- Loads `Corpus` and `tool_specs` once before dispatch; both are shared read-only across workers
+- Initializes the OpenAI client before starting threads to avoid racing on the module-level client cache
+- Submits each ticket independently with its original row index
+- Stores completed rows into a pre-sized results list by index, so `output.csv` preserves input order even though tickets finish out of order
+- Keeps one ticket per OpenAI request; tickets are not batched together because batching can mix context, sources, and safety decisions across unrelated support issues
+- If OpenAI rate limits are encountered, reduce `MAX_WORKERS` to `2`; the existing OpenAI retry/backoff still handles transient throttling
+
 ### confidence.py — Deterministic Confidence
 - Base: mean of top-3 retrieval scores (0.30 floor if no results)
 - Source bonus: +0.05 per unique source, capped at +0.15
@@ -93,6 +103,14 @@ RRF rewards chunks ranking highly across multiple queries — more robust than s
 **Domain inference + boost:** `infer_domain()` counts domain keyword matches. Chunks from the inferred domain get a ×1.2 RRF multiplier.
 
 **top-k = 7 retrieved, top-5 sent to LLM** — extra 2 as dedup buffer.
+
+## Parallel Processing Strategy
+
+Tickets are parallelized at the ticket boundary, while each ticket still runs through the full safety, retrieval, OpenAI, validation, and confidence pipeline. This preserves accuracy because no worker shares prompt context with another ticket, and source attribution remains derived from that ticket's own retrieval results.
+
+`main.py` uses a bounded `ThreadPoolExecutor` instead of batching multiple tickets into one prompt. The default `MAX_WORKERS=4` is a conservative starting point that improves wall-clock runtime while limiting OpenAI rate-limit pressure. For tighter account limits, run with `MAX_WORKERS=2`; for higher limits, increase gradually and verify output quality and error rate.
+
+The output order is deterministic: each future carries the original ticket index, and the completed row is written back to `results[index]`. Progress logs show completion order, but `support_tickets/output.csv` follows the original CSV order.
 
 ## Safety / Adversarial Handling
 
@@ -163,6 +181,26 @@ result dict
 output row (14 cols)
 ```
 
+### Batch Execution Diagram
+
+```
+support_tickets.csv
+    │
+    ▼
+load Corpus + tool_specs once
+    │
+    ▼
+ThreadPoolExecutor(max_workers=MAX_WORKERS, default 4)
+    │
+    ├── ticket 0 ──► process_ticket() ──► results[0]
+    ├── ticket 1 ──► process_ticket() ──► results[1]
+    ├── ticket 2 ──► process_ticket() ──► results[2]
+    └── ...
+    │
+    ▼
+write output.csv in original row order
+```
+
 ## Self-Assessment
 
 | Dimension | Score | Rationale |
@@ -174,6 +212,6 @@ output row (14 cols)
 | Source attribution | 9 | Paths from retrieval only, validated on disk — zero hallucinated paths |
 | Tool calling | 8 | Strict schema: name, required, no-extra, types, prerequisites |
 | Confidence calibration | 7 | Deterministic formula; not empirically calibrated |
-| Speed | 9 | ~1s/ticket on OpenAI API |
+| Speed | 9 | Bounded parallelism with `MAX_WORKERS=4` reduces wall-clock runtime while preserving one-ticket-per-request accuracy |
 | Determinism | 10 | temperature=0, seed=42 |
 | Code quality | 8 | Clear module boundaries, no hardcoded keys, 59 tests |
